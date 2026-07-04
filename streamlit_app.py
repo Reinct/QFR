@@ -17,9 +17,13 @@ def load_model():
     import urllib.request
     path = os.path.join(os.path.dirname(__file__), "streamlit_model.joblib")
     if not os.path.exists(path):
-        url = "https://github.com/Reinct/QFR/releases/download/v1.0/streamlit_model.joblib"
-        with st.spinner("Downloading model (~105 MB)..."):
+        url = "https://github.com/Reinct/QFR/releases/latest/download/streamlit_model.joblib"
+        st.info(f"Downloading model (~105 MB)...")
+        try:
             urllib.request.urlretrieve(url, path)
+        except Exception as e:
+            st.error(f"Download failed: {e}. Make sure the Release exists with the model file.")
+            st.stop()
     return joblib.load(path)
 
 st.title("ISR Risk Predictor — QFR/RWS")
