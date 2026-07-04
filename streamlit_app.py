@@ -14,7 +14,12 @@ st.set_page_config(page_title="ISR Risk Predictor", layout="wide")
 
 @st.cache_resource
 def load_model():
-    path = os.path.join(os.path.dirname(__file__), "output", "streamlit_model.joblib")
+    import urllib.request
+    path = os.path.join(os.path.dirname(__file__), "streamlit_model.joblib")
+    if not os.path.exists(path):
+        url = "https://github.com/Reinct/QFR/releases/download/v1.0/streamlit_model.joblib"
+        with st.spinner("Downloading model (~105 MB)..."):
+            urllib.request.urlretrieve(url, path)
     return joblib.load(path)
 
 st.title("ISR Risk Predictor — QFR/RWS")
