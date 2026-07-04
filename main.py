@@ -411,11 +411,11 @@ def main():
     # 保存模型 (与本次分析完全一致)
     import joblib
     from config import scaler
-    joblib.dump({"model": best_model,
+    joblib.dump({"model": best_model, "model_name": best_name,
                  "scaler_means": scaler.means, "scaler_stds": scaler.stds,
                  "sel_vars": sel_result["selected_vars"], "sel_names": sel_names,
                  "indices": sel_idx, "pred_cols": pred_cols,
-                 "X_ref": X[:50], "y_ref": y_full},
+                 "X_ref": X, "y_ref": y_full},
                 str(OUT_DIR / "streamlit_model.joblib"), compress=3)
     print(f"  Model saved: {OUT_DIR / 'streamlit_model.joblib'}")
 

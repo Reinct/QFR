@@ -1,10 +1,8 @@
 """
 streamlit_app.py — ISR Risk Predictor
-Run: streamlit run streamlit_app.py
 """
 import streamlit as st
 import numpy as np
-import pandas as pd
 import joblib
 import shap
 import matplotlib.pyplot as plt
@@ -18,19 +16,20 @@ def load_model():
     path = os.path.join(os.path.dirname(__file__), "streamlit_model.joblib")
     if not os.path.exists(path):
         url = "https://github.com/Reinct/QFR/releases/latest/download/streamlit_model.joblib"
-        st.info(f"Downloading model (~105 MB)...")
+        st.info("Downloading model (~105 MB)...")
         try:
             urllib.request.urlretrieve(url, path)
         except Exception as e:
-            st.error(f"Download failed: {e}. Make sure the Release exists with the model file.")
+            st.error(f"Download failed: {e}")
             st.stop()
     return joblib.load(path)
 
 st.title("ISR Risk Predictor — QFR/RWS")
-st.markdown("*In-Stent Restenosis prediction based on QFR and RWS biomechanical parameters*")
+st.markdown("*In-Stent Restenosis prediction based on QFR and RWS*")
 
 data = load_model()
 model = data["model"]
+model_name = data.get("model_name", "GBSA")
 means = data["scaler_means"]
 stds = data["scaler_stds"]
 sel_names = data["sel_names"]
@@ -38,23 +37,45 @@ sel_vars = data["sel_vars"]
 n_patients = len(data["y_ref"])
 n_events = int(data["y_ref"]["retenosis"].sum())
 
+# ---- 推断每个变量的类型和取值 ----
+var_info = {}  # {orig_var: {"type": "cont"|"binary"|"multi", "levels": [...], "col_idx": [...]}}
+for v in sel_vars:
+    cols = [j for j, sn in enumerate(sel_names) if sn == v or sn.startswith(v + "_")]
+    if v in means:
+        var_info[v] = {"type": "cont", "label": v}
+    elif len(cols) == 1:
+        var_info[v] = {"type": "binary", "levels": [0, 1], "label": v}
+    else:
+        # 多分类: site_2, site_3 → max level
+        max_lvl = 1
+        for sn in sel_names:
+            if sn.startswith(v + "_"):
+                parts = sn.rsplit("_", 1)
+                if parts[1].isdigit():
+                    max_lvl = max(max_lvl, int(parts[1]))
+        var_info[v] = {"type": "multi", "levels": list(range(1, max_lvl + 1)), "label": v}
+
+# ---- Sidebar ----
 st.sidebar.header("Patient Parameters")
-st.sidebar.caption(f"Trained on {n_patients} patients ({n_events} ISR events)")
+st.sidebar.caption(f"Model: {model_name} | {n_patients} patients, {n_events} events")
 st.sidebar.caption(f"{len(sel_vars)} features selected by LASSO")
 
 inputs = {}
 cols = st.sidebar.columns(2)
 for i, v in enumerate(sel_vars):
+    info = var_info[v]
     with cols[i % 2]:
-        if v in means:
-            mu = means[v]; sg = max(stds[v], 1e-8)
+        if info["type"] == "cont":
+            mu = means.get(v, 0); sg = max(stds.get(v, 1), 1e-8)
             inputs[v] = st.number_input(v, value=float(round(mu, 2)),
                                         step=float(max(0.01, round(sg/5, 2))),
                                         format="%.3f", key=v)
+        elif info["type"] == "multi":
+            inputs[v] = st.selectbox(v, info["levels"], key=v)
         else:
             inputs[v] = st.selectbox(v, [0, 1], key=v)
 
-
+# ---- Build input ----
 def build_input():
     x = np.zeros(len(sel_names))
     for j, sn in enumerate(sel_names):
@@ -65,31 +86,26 @@ def build_input():
             x[j] = val
         else:
             for inp_name, inp_val in inputs.items():
-                if sn.startswith(inp_name + "_"):
-                    parts = sn.rsplit("_", 1)
-                    if len(parts) == 2 and parts[1].isdigit():
-                        if int(parts[1]) == int(inp_val):
-                            x[j] = 1.0
+                if sn == inp_name + "_" + str(int(inp_val)):
+                    x[j] = 1.0
                     break
     return x
 
-
+# ---- Predict ----
 if st.sidebar.button("Predict ISR Risk", type="primary", use_container_width=True):
     x_input = build_input()
-    # 用 survival function 计算 2 年事件概率
     surv = model.predict_survival_function(x_input.reshape(1, -1), return_array=True)[0]
     t2 = min(730, model.unique_times_[-1]) if hasattr(model, 'unique_times_') else 730
     k2 = np.argmin(np.abs(model.unique_times_ - t2)) if hasattr(model, 'unique_times_') else len(surv) - 1
     prob = 1.0 - float(surv[k2])
     prob_pct = prob * 100
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     col1.metric("ISR Probability (2yr)", f"{prob_pct:.1f}%")
     level = "Low Risk" if prob_pct < 20 else ("Moderate Risk" if prob_pct < 40 else "High Risk")
     col2.metric("Risk Level", level)
-    col3.metric("Predicted at", "2 years")
 
-    st.subheader("Feature Contributions (SHAP)")
+    st.subheader("SHAP Explanation")
     try:
         X_ref = data["X_ref"][:min(50, data["X_ref"].shape[0])]
         explainer = shap.KernelExplainer(model.predict, X_ref)
@@ -103,7 +119,7 @@ if st.sidebar.button("Predict ISR Risk", type="primary", use_container_width=Tru
         st.warning(f"SHAP unavailable: {e}")
 
 with st.expander("Model Info"):
-    st.write(f"**Model:** Gradient Boosting Survival Analysis (GBSA)")
+    st.write(f"**Model:** {model_name}")
     st.write(f"**Training data:** {n_patients} PCI patients, {n_events} ISR events")
     st.write(f"**Features:** {sel_vars}")
     st.write(f"**Validation:** .632+ Bootstrap (100 iterations)")
