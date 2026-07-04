@@ -1,0 +1,13 @@
+pandas>=1.5
+numpy>=1.21
+scipy>=1.9
+scikit-learn>=1.1
+scikit-survival>=0.21
+lifelines>=0.27
+shap>=0.41
+statsmodels>=0.14
+matplotlib>=3.7
+seaborn>=0.12
+openpyxl>=3.0
+streamlit>=1.28
+joblib>=1.3
