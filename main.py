@@ -16,7 +16,7 @@ from visualization import (
     plot_shap_importance, plot_shap_beeswarm, plot_shap_waterfall,
     plot_shap_force, plot_calibration_single, plot_cv_panel,
 )
-from config import OUT_DIR, CD_AUC_DENSE_N
+from config import OUT_DIR, CD_AUC_DENSE_N, scaler
 from utils import save_table
 
 
@@ -372,10 +372,19 @@ def main():
     save_table(pd.DataFrame(shap_vals, columns=sel_names), "table_shap_values")
     X_disp = X_shap_arr
 
-    # SHAP importance
+    # SHAP importance (with direction: corr between feature value and SHAP)
     imp = np.abs(shap_vals).mean(axis=0)
-    imp_df = pd.DataFrame({"variable": sel_names, "importance": imp}).sort_values("importance", ascending=False)
+    direction = np.array([np.corrcoef(X_disp[:, j], shap_vals[:, j])[0, 1]
+                          if X_disp[:, j].std() > 1e-8 else 0 for j in range(X_disp.shape[1])])
+    imp_df = pd.DataFrame({"variable": sel_names, "importance": imp,
+                           "direction": direction}).sort_values("importance", ascending=False)
     save_table(imp_df, "table_shap_importance")
+
+    # Unscale X_disp for SHAP display
+    X_unscaled = np.array(X_disp)
+    for j, sn in enumerate(sel_names):
+        if sn in scaler.means:
+            X_unscaled[:, j] = scaler.unscale_array(sn, X_disp[:, j])
 
     # Figures
     print("\n" + "=" * 60)
@@ -385,9 +394,9 @@ def main():
     except Exception as e: print(f"  [FAIL] Fig 1: {e}")
     try: plot_roc_panels(roc_data); print("  [OK] Fig 2: 1/2/3yr ROC (.632+)")
     except Exception as e: print(f"  [FAIL] Fig 2: {e}")
-    try: plot_shap_importance(imp_df, model_name=best_name); print("  [OK] Fig 3: SHAP importance")
+    try: plot_shap_importance(imp_df, model_name=best_name); print("  [OK] Fig 3: SHAP importance (with direction)")
     except Exception as e: print(f"  [FAIL] Fig 3: {e}")
-    try: plot_shap_beeswarm(shap_vals, X_disp, sel_names, model_name=best_name); print("  [OK] Fig 4: SHAP beeswarm")
+    try: plot_shap_beeswarm(shap_vals, X_unscaled, sel_names, model_name=best_name); print("  [OK] Fig 4: SHAP beeswarm (original scale)")
     except Exception as e: print(f"  [FAIL] Fig 4: {e}")
     try: plot_shap_waterfall(shap_vals, X_disp, sel_names, model_name=best_name, patient_idx=0); print("  [OK] Fig 5: SHAP waterfall")
     except Exception as e: print(f"  [FAIL] Fig 5: {e}")
@@ -410,7 +419,6 @@ def main():
 
     # 保存模型 (与本次分析完全一致)
     import joblib
-    from config import scaler
     joblib.dump({"model": best_model, "model_name": best_name,
                  "scaler_means": scaler.means, "scaler_stds": scaler.stds,
                  "sel_vars": sel_result["selected_vars"], "sel_names": sel_names,
@@ -431,6 +439,10 @@ def main():
 def _build_baseline_table(df, y):
     """Table 1: Baseline characteristics by ISR status"""
     from scipy.stats import ttest_ind, chi2_contingency
+    cat_labels = {
+        "site": {1: "LAD", 2: "LCX", 3: "RCA"},
+        "ACS": {1: "UA", 2: "NSTEMI", 3: "STEMI"},
+    }
     event_mask = y["retenosis"] == 1
     rows = []
     for col in df.columns:
@@ -439,8 +451,23 @@ def _build_baseline_table(df, y):
         vals = df[col]
         vals0 = vals[~event_mask]
         vals1 = vals[event_mask]
-        # continuous (>5 unique values and numeric)
-        if pd.api.types.is_numeric_dtype(vals) and vals.nunique() > 5:
+        # 明确分类变量
+        if col in cat_labels:
+            labels = cat_labels[col]
+            for lvl in sorted(labels.keys()):
+                n_all = (vals == lvl).sum()
+                n0 = (vals0 == lvl).sum()
+                n1 = (vals1 == lvl).sum()
+                rows.append({
+                    "Characteristic": f"  {labels[lvl]}",
+                    f"Overall (n={len(vals)})": f"{n_all} ({n_all/len(vals)*100:.1f}%)",
+                    f"No ISR (n={sum(~event_mask)})": f"{n0} ({n0/len(vals0)*100:.1f}%)",
+                    f"ISR (n={sum(event_mask)})": f"{n1} ({n1/len(vals1)*100:.1f}%)",
+                    "P-value": "–",
+                })
+            # 加一个总行标签
+            rows.insert(-len(labels), {"Characteristic": col, **{k: "" for k in rows[-1] if k != "Characteristic"}})
+        elif pd.api.types.is_numeric_dtype(vals) and vals.nunique() > 5:
             try:
                 _, p = ttest_ind(vals0, vals1)
             except Exception:

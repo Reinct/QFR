@@ -99,11 +99,13 @@ def plot_timepoint_auc(full_evals):
 # ═══════════════════════════════════════════════
 def plot_shap_importance(imp_df, model_name="Best", top_n=15):
     df = imp_df.head(top_n).iloc[::-1]
-    fig, ax = plt.subplots(figsize=(8, max(5, len(df)*0.35)))
-    colors = plt.cm.Reds(0.3+0.7*df["importance"].values/df["importance"].max())
-    ax.barh(np.arange(len(df)), df["importance"].values, color=colors, edgecolor="white")
+    fig, ax = plt.subplots(figsize=(8, max(5, len(df)*0.4)))
+    dirs = df["direction"].values if "direction" in df.columns else np.zeros(len(df))
+    colors = ["#E64B35" if d > 0 else "#1F77B4" for d in dirs]
+    ax.barh(np.arange(len(df)), df["importance"].values, color=colors, edgecolor="white", alpha=0.85)
     ax.set_yticks(np.arange(len(df))); ax.set_yticklabels(df["variable"].values); ax.invert_yaxis()
-    ax.set_xlabel("Mean(|SHAP value|)"); ax.set_title(f"SHAP Feature Importance — {model_name}")
+    ax.set_xlabel("Mean(|SHAP value|)")
+    ax.set_title(f"SHAP Importance — {model_name}\n(red=high value→high risk, blue=high value→low risk)", fontsize=11)
     plt.tight_layout(); save_figure(fig, "fig3_shap_importance"); return fig
 
 

@@ -108,12 +108,17 @@ if st.sidebar.button("Predict ISR Risk", type="primary", use_container_width=Tru
     st.subheader("SHAP Explanation")
     try:
         X_ref = data["X_ref"][:min(50, data["X_ref"].shape[0])]
+        # Unscale reference data for display
+        X_disp = x_input.reshape(1, -1).copy()
+        for j, sn in enumerate(sel_names):
+            if sn in means:
+                X_disp[0, j] = X_disp[0, j] * stds[sn] + means[sn]
         explainer = shap.KernelExplainer(model.predict, X_ref)
         sv = explainer.shap_values(x_input.reshape(1, -1), nsamples=200, silent=True)
         fig, ax = plt.subplots(figsize=(10, 5))
         shap.waterfall_plot(
             shap.Explanation(values=sv[0], base_values=float(explainer.expected_value),
-                             feature_names=sel_names), show=False)
+                             data=X_disp[0], feature_names=sel_names), show=False)
         st.pyplot(fig)
     except Exception as e:
         st.warning(f"SHAP unavailable: {e}")
